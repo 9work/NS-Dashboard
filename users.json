@@ -1,0 +1,17 @@
+{
+    "ahmed.essam@nstextile-eg.com": {
+        "password": "a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3",
+        "branches": ["فرع الازهر2", "فرع الازهر3", "فرع القلعة", "فرع الموسكى"],
+        "is_admin": false
+    },
+    "mohamed.hussein@nstextile-eg.com": {
+        "password": "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9",
+        "branches": [],
+        "is_admin": true
+    },
+    "mahmoud.bayoumi@nstextile-eg.com": {
+        "password": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+        "branches": [],
+        "is_admin": true
+    }
+}
