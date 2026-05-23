@@ -215,15 +215,26 @@ def dashboard_page():
         st.error("لم يتم العثور على ملفات البيانات في المجلد، أو أن هناك مشكلة توافق في الملفات المرفوعة. يرجى رفع الملفات الصحيحة من صفحة الإعدادات.")
         return
     
+# اختيار مصدر الفرع: الفرع الأصلي أم الفرع حسب مندوب المبيعات
+    branch_source = st.radio(
+        "مصدر الفرع",
+        ["الفرع الأصلي", "الفرع حسب المندوب"],
+        horizontal=True,
+    )
+    if branch_source == "الفرع الأصلي":
+        branch_column = "Branch"
+        brand_column = "Brand"
+    else:
+        branch_column = "Branch based on sales reps"
+        brand_column = "Brand based on sales reps"
+
     # فلتر الفروع حسب صلاحية المستخدم
     allowed_branches = st.session_state.user_branches
     if st.session_state.is_admin or not allowed_branches:
-        allowed_branches = list(sales_df["Branch based on sales reps"].unique())
-    
-    # فلتر العلامة التجارية ونوع العميل باستخدام بيانات sales reps
-    branch_column = "Branch based on sales reps"
-    brand_column = "Brand based on sales reps"
-    col1, col2, col3 = st.columns(3)
+        allowed_branches = list(sales_df[branch_column].dropna().unique())
+
+    # فلتر العلامة التجارية ونوع العميل
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         brand_options = ["الكل"] + sorted(sales_df[brand_column].dropna().unique())
         brand_filter = st.selectbox("العلامة التجارية", brand_options)
@@ -244,6 +255,10 @@ def dashboard_page():
         branch_choice = st.selectbox("الفرع", branch_choice_options)
     with col3:
         cust_filter = st.selectbox("نوع العميل", ["الكل", "B2B", "B2C"])
+    with col4:
+        st.write(" ")
+        st.write(" ")
+        st.caption(f"تصفية بـ: {branch_source}")
 
     # تحويل اختيار الفرع إلى قائمة فروع مستخدمة (مطلوب من compute_kpis)
     if branch_choice == "الكل":
@@ -290,9 +305,9 @@ def dashboard_page():
     c2.metric("👥 عدد العملاء الفريدين", f"{kpis['Customers']:,.0f}")
     c3.metric("🏷️ الخصم", f"{kpis['Discount']:,.0f} جنيه", f"نسبة الخصم {kpis['Discount Ratio']:.1%}")
     
-    # Daily sales chart with achievement percentage
+    # Daily sales chart with achievement percentage (صافي = مبيعات - مرتجعات)
     st.subheader("Daily Sales & Achievement Ratio")
-    daily_sales = filtered_sales[filtered_sales["Sales Type"]=="Sales"].groupby("Date")["Total After Disc"].sum().reset_index()
+    daily_sales = filtered_sales[filtered_sales["Sales Type"].isin(["Sales", "Return"])].groupby("Date")["Total After Disc"].sum().reset_index()
     daily_sales["Date"] = pd.to_datetime(daily_sales["Date"], errors="coerce")
     daily_sales = daily_sales.dropna(subset=["Date"]).sort_values("Date")
     current_day = datetime.today().day
@@ -352,7 +367,8 @@ def dashboard_page():
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Sales by Brand")
-        brand_sales = filtered_sales[filtered_sales["Sales Type"]=="Sales"].groupby("Brand")["Total After Disc"].sum()
+        # This chart only follows the branch source selection and ignores other filters.
+        brand_sales = sales_df[sales_df["Sales Type"].isin(["Sales", "Return"])].groupby(brand_column)["Total After Disc"].sum()
         fig_pie = px.pie(
             values=brand_sales.values,
             names=brand_sales.index,
@@ -365,16 +381,27 @@ def dashboard_page():
 
     with col2:
         st.subheader("Sales by Customer Type")
-        cust_sales = filtered_sales[filtered_sales["Sales Type"]=="Sales"].groupby("Customer Type")["Total After Disc"].sum()
+        cust_sales = filtered_sales[filtered_sales["Sales Type"].isin(["Sales", "Return"])].groupby("Customer Type")["Total After Disc"].sum()
+        total_cust = cust_sales.sum()
+        cust_percent = (cust_sales / total_cust * 100).round(1)
         fig_cust = px.bar(
             x=cust_sales.index,
             y=cust_sales.values,
-            text=cust_sales.values,
+            color=cust_sales.index,
+            color_discrete_map={"B2B": "#1f77b4", "B2C": "#ff7f0e"},
+            text=[f"{p:.1f}%" for p in cust_percent],
             labels={"x": "Customer Type", "y": "Sales Amount"},
             title="Sales by Customer Type",
         )
-        fig_cust.update_traces(texttemplate="%{text:,.0f}", textposition="outside", marker_color="#9467bd")
-        fig_cust.update_layout(height=420, margin=dict(l=50, r=40, t=60, b=70), xaxis_tickangle=-45, yaxis=dict(fixedrange=True), xaxis=dict(fixedrange=True))
+        fig_cust.update_traces(textposition="outside", marker_line_width=0)
+        fig_cust.update_layout(
+            height=420,
+            margin=dict(l=50, r=40, t=60, b=70),
+            xaxis_tickangle=-45,
+            yaxis=dict(fixedrange=True),
+            xaxis=dict(fixedrange=True),
+            showlegend=False,
+        )
         st.plotly_chart(fig_cust, use_container_width=True, config={"displayModeBar": False})
 
     # جداول الأداء
@@ -412,8 +439,9 @@ def dashboard_page():
         if target_total == 0 and target_b2b == 0 and target_b2c == 0:
             continue
 
-        sales_b2b = filtered_sales[(filtered_sales[branch_column] == branch) & (filtered_sales["Sales Type"] == "Sales") & (filtered_sales["Customer Type"] == "B2B")]["Total After Disc"].sum()
-        sales_b2c = filtered_sales[(filtered_sales[branch_column] == branch) & (filtered_sales["Sales Type"] == "Sales") & (filtered_sales["Customer Type"] == "B2C")]["Total After Disc"].sum()
+        # احسب صافي المبيعات: مجموع Sales و Return (المرتجعات مُسجَّلة بإشارة سالبة عادة)
+        sales_b2b = filtered_sales[(filtered_sales[branch_column] == branch) & (filtered_sales["Customer Type"] == "B2B") & (filtered_sales["Sales Type"].isin(["Sales","Return"]))]["Total After Disc"].sum()
+        sales_b2c = filtered_sales[(filtered_sales[branch_column] == branch) & (filtered_sales["Customer Type"] == "B2C") & (filtered_sales["Sales Type"].isin(["Sales","Return"]))]["Total After Disc"].sum()
         sales_total = sales_b2b + sales_b2c
         branch_perf.append({
             "Branch": branch,
@@ -484,7 +512,30 @@ def dashboard_page():
     col_r_b2c = find_target_column(rep_target, ["Sales Target | B2C", "Sales Target B2C", "B2C MTD Target"])
     col_r_total = find_target_column(rep_target, ["Sales Target | TOTAL", "Sales Target TOTAL", "Total Target"])
 
-    sales_rep_data = filtered_sales[filtered_sales["Sales Type"] == "Sales"]
+    # Sales Rep Performance should always use 'Branch based on sales reps' as branch source
+    rep_branch_col = "Branch based on sales reps"
+    rep_brand_col = "Brand based on sales reps"
+
+    # Determine which rep-based branches to include based on the current branch selection.
+    if branch_choice == "الكل":
+        selected_rep_branches = sales_df[rep_branch_col].dropna().unique().tolist()
+    else:
+        # If the current branch_choice exists in rep-branch values, use it directly.
+        if branch_choice in sales_df[rep_branch_col].dropna().unique():
+            selected_rep_branches = [branch_choice]
+        else:
+            # Otherwise map original branch selection to rep-based branches present in the data
+            selected_rep_branches = sales_df[sales_df["Branch"] == branch_choice][rep_branch_col].dropna().unique().tolist()
+
+    # Build sales data for reps using rep-based branch mapping, include returns for net calculation
+    sales_rep_data = sales_df[sales_df[rep_branch_col].isin(selected_rep_branches) & sales_df["Sales Type"].isin(["Sales", "Return"])].copy()
+    # Apply customer-type filter if set
+    if cust_filter and cust_filter != "الكل":
+        sales_rep_data = sales_rep_data[sales_rep_data["Customer Type"] == cust_filter]
+    # Apply brand filter using rep-based brand column
+    if brand_filter and brand_filter != "الكل":
+        sales_rep_data = sales_rep_data[sales_rep_data[rep_brand_col] == brand_filter]
+
     sales_reps = sales_rep_data["Sales Person"].dropna().unique()
     if isinstance(rep_target, pd.DataFrame) and "Sales Rep" in rep_target.columns:
         target_reps = rep_target[rep_target["Sales Rep"].isin(sales_reps)]["Sales Rep"].dropna().unique()
