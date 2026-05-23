@@ -384,16 +384,17 @@ def dashboard_page():
         cust_sales = filtered_sales[filtered_sales["Sales Type"].isin(["Sales", "Return"])].groupby("Customer Type")["Total After Disc"].sum()
         total_cust = cust_sales.sum()
         cust_percent = (cust_sales / total_cust * 100).round(1)
+        label_text = [f"{p:.1f}%\n{v:,.0f}" for p, v in zip(cust_percent, cust_sales.values)]
         fig_cust = px.bar(
             x=cust_sales.index,
             y=cust_sales.values,
             color=cust_sales.index,
             color_discrete_map={"B2B": "#1f77b4", "B2C": "#ff7f0e"},
-            text=[f"{p:.1f}%" for p in cust_percent],
+            text=label_text,
             labels={"x": "Customer Type", "y": "Sales Amount"},
             title="Sales by Customer Type",
         )
-        fig_cust.update_traces(textposition="outside", marker_line_width=0)
+        fig_cust.update_traces(textposition="outside", marker_line_width=0, textfont=dict(size=12))
         fig_cust.update_layout(
             height=420,
             margin=dict(l=50, r=40, t=60, b=70),
