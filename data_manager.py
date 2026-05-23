@@ -119,8 +119,10 @@ def compute_kpis(sales_df, branch_target_df, selected_branches, customer_type=No
         sales_filtered = sales_filtered[sales_filtered[brand_col] == brand_filter]
     
     # فصل المبيعات عن المرتجعات
-    sales_amount = sales_filtered[sales_filtered["Sales Type"] == "Sales"]["Total After Disc"].sum()
+    sales_only_amount = sales_filtered[sales_filtered["Sales Type"] == "Sales"]["Total After Disc"].sum()
     return_amount = sales_filtered[sales_filtered["Sales Type"] == "Return"]["Total After Disc"].sum()
+    # اجعل قيمة المبيعات صافية من المرتجعات (المرتجعات من المفترض أن تكون ذات إشارة سالبة)
+    sales_amount = sales_only_amount + return_amount
     quantity = sales_filtered[sales_filtered["Sales Type"] == "Sales"]["Qty"].sum()
     
     invoices = sales_filtered[sales_filtered["Sales Type"] == "Sales"]["Invoice No"].nunique() if "Invoice No" in sales_filtered.columns else 0
