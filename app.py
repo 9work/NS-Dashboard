@@ -3,8 +3,48 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
-import os  # تم إضافة المكتبة للتحقق من مسارات الملفات المرفوعة
-from auth import authenticate, load_users, add_user, update_user, delete_user, save_users
+from pathlib import Path
+from typing import Optional
+import os
+from streamlit_theme import st_theme
+
+APP_DIR = Path(__file__).resolve().parent
+LIGHT_LOGO = APP_DIR / "assets" / "ns_logo.png"
+DARK_LOGO = APP_DIR / "assets" / "ns_logo_dark.png"
+
+
+def _is_dark_theme() -> bool:
+    theme = st_theme(key="ns_dashboard_theme")
+    if theme and isinstance(theme, dict):
+        return str(theme.get("base", "")).lower() == "dark"
+    return False
+
+
+def _active_logo_path() -> Optional[Path]:
+    if LIGHT_LOGO.is_file() and DARK_LOGO.is_file():
+        return DARK_LOGO if _is_dark_theme() else LIGHT_LOGO
+    if LIGHT_LOGO.is_file():
+        return LIGHT_LOGO
+    if DARK_LOGO.is_file():
+        return DARK_LOGO
+    return None
+
+
+def render_dashboard_header(title: str, logo_width: int = 110):
+    logo_path = _active_logo_path()
+
+    if logo_path:
+        col_logo, col_title = st.columns([1, 7], vertical_alignment="center")
+        with col_logo:
+            st.image(str(logo_path), width=logo_width)
+        with col_title:
+            st.title(title)
+    else:
+        st.title(title)
+from auth import (
+    authenticate, load_users, add_user, update_user, delete_user, save_users,
+    get_user_permission_type, is_super_admin, can_access_all_branches, get_all_users
+)
 from data_manager import load_sales_data, load_target_data, compute_kpis, compute_mtd_target
 
 # إعدادات الصفحة
@@ -17,12 +57,16 @@ if "user_email" not in st.session_state:
     st.session_state.user_email = None
 if "user_branches" not in st.session_state:
     st.session_state.user_branches = []
+if "user_permission_type" not in st.session_state:
+    st.session_state.user_permission_type = None
+if "user_branch_filter_type" not in st.session_state:
+    st.session_state.user_branch_filter_type = None
 if "is_admin" not in st.session_state:
     st.session_state.is_admin = False
 if "mtd_mode" not in st.session_state:
     st.session_state.mtd_mode = "Last sales date"
 if "mtd_month_length" not in st.session_state:
-    st.session_state.mtd_month_length = 0
+    st.session_state.mtd_month_length = 25
 
 # تعديل الدالة لتقرأ الملفات المرفوعة مؤقتاً تلقائياً في حال وجودها
 @st.cache_resource
@@ -89,125 +133,290 @@ def get_mtd_factor(mode, sales_df, month_length=0):
 # واجهة تسجيل الدخول
 def login_page():
     st.title("🔐 تسجيل الدخول")
-    email = st.text_input("البريد الإلكتروني")
-    password = st.text_input("كلمة المرور", type="password")
-    if st.button("دخول"):
-        user = authenticate(email, password)
+    with st.form("login_form", clear_on_submit=False):
+        email = st.text_input("البريد الإلكتروني")
+        password = st.text_input("كلمة المرور", type="password")
+        submitted = st.form_submit_button("دخول")
+    if submitted:
+        user = authenticate(email.strip(), password)
         if user:
             st.session_state.logged_in = True
-            st.session_state.user_email = email
-            st.session_state.user_branches = user["branches"]
-            st.session_state.is_admin = user["is_admin"]
+            st.session_state.user_email = email.strip()
+            st.session_state.user_branches = user.get("branches", [])
+            st.session_state.user_permission_type = user.get("permission_type", "specific_branches")
+            st.session_state.user_branch_filter_type = user.get("branch_filter_type")
+            st.session_state.is_admin = user.get("is_admin", False)
             st.rerun()
         else:
             st.error("بيانات الدخول غير صحيحة")
 
 # صفحة الإعدادات (للمدير فقط)
+# صفحة الإعدادات
 def settings_page():
-    st.title("⚙️ الإعدادات - إدارة المستخدمين وتحميل الملفات")
-    if not st.session_state.is_admin:
-        st.warning("هذه الصفحة مخصصة للمديرين فقط.")
+    from auth import is_super_admin, get_all_users, PERMISSION_TYPES
+    
+    st.title("⚙️ الإعدادات")
+    
+    # =============================================
+    # قسم تغيير كلمة المرور (يظهر للجميع)
+    # =============================================
+    with st.expander("🔑 تغيير كلمة المرور", expanded=True):
+        
+        # التحقق إذا كان المستخدم مدير عام أم لا
+        is_admin = is_super_admin(st.session_state.user_email)
+        
+        if is_admin:
+            # المدير العام: يمكنه تغيير كلمة المرور لأي مستخدم
+            st.markdown("**🔐 تغيير كلمة المرور لأي مستخدم (صلاحية المدير العام)**")
+            users = get_all_users()
+            
+            if users:
+                # اختيار المستخدم من القائمة
+                selected_user_email = st.selectbox(
+                    "اختر المستخدم", 
+                    list(users.keys()), 
+                    key="admin_pass_change_select"
+                )
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    new_password = st.text_input("كلمة المرور الجديدة", type="password", key="admin_new_pass")
+                with col2:
+                    confirm_password = st.text_input("تأكيد كلمة المرور", type="password", key="admin_confirm_pass")
+                
+                if st.button("تحديث كلمة المرور", key="admin_update_pass"):
+                    if new_password and new_password == confirm_password:
+                        update_user(
+                            selected_user_email,
+                            password=new_password,
+                            permission_type=None,
+                            branch_filter_type=None,
+                            branches=None
+                        )
+                        st.success(f"✅ تم تحديث كلمة المرور للمستخدم {selected_user_email} بنجاح")
+                        st.rerun()
+                    elif not new_password:
+                        st.error("❌ يرجى إدخال كلمة المرور الجديدة")
+                    else:
+                        st.error("❌ كلمات المرور غير متطابقة")
+            else:
+                st.info("لا يوجد مستخدمون")
+        
+        else:
+            # المستخدم العادي: يغير كلمة المرور الخاصة به فقط
+            st.markdown(f"**🔐 تغيير كلمة المرور الخاصة بحسابك: {st.session_state.user_email}**")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                new_password = st.text_input("كلمة المرور الجديدة", type="password", key="user_new_pass")
+            with col2:
+                confirm_password = st.text_input("تأكيد كلمة المرور", type="password", key="user_confirm_pass")
+            
+            if st.button("تحديث كلمة المرور", key="user_update_pass"):
+                if new_password and new_password == confirm_password:
+                    update_user(
+                        st.session_state.user_email,
+                        password=new_password,
+                        permission_type=None,
+                        branch_filter_type=None,
+                        branches=None
+                    )
+                    st.success("✅ تم تحديث كلمة المرور بنجاح")
+                    st.info("🔐 سيتم تطبيق التغيير عند تسجيل الدخول下一次")
+                    st.rerun()
+                elif not new_password:
+                    st.error("❌ يرجى إدخال كلمة المرور الجديدة")
+                else:
+                    st.error("❌ كلمات المرور غير متطابقة")
+    
+    st.markdown("---")
+    
+    # =============================================
+    # باقي الإعدادات (تظهر فقط للمدير العام)
+    # =============================================
+    if not is_super_admin(st.session_state.user_email):
+        st.warning("⚠️ الإعدادات المتقدمة متاحة للمديرين العامين فقط.")
         return
     
-    st.header("📂 تحديث ملفات البيانات")
-    sales_file = st.file_uploader("رفع ملف المبيعات (Sales This Month.xlsx)", type=["xlsx"])
-    target_file = st.file_uploader("رفع ملف الأهداف (Target This Month.xlsx)", type=["xlsx"])
-    if st.button("تحميل ومعالجة"):
-        if sales_file and target_file:
-            # حفظ الملفات مؤقتاً ثم إعادة تحميل البيانات
-            with open("temp_sales.xlsx", "wb") as f:
-                f.write(sales_file.read())
-            with open("temp_target.xlsx", "wb") as f:
-                f.write(target_file.read())
-            # مسح الكاش لتحميل البيانات الجديدة
-            st.cache_resource.clear()
-            st.success("تم رفع الملفات وتحديث البيانات بنجاح! انتقل الآن إلى الصفحة الرئيسية لعرض لوحة البيانات.")
-        else:
-            st.error("يرجى رفع كلا الملفين")
-
-    st.subheader("📌 معلومات الملفات المرفوعة")
-    sales_path = "temp_sales.xlsx" if os.path.exists("temp_sales.xlsx") else "Sales (Naguib Selim) This Month.xlsx"
-    target_path = "temp_target.xlsx" if os.path.exists("temp_target.xlsx") else "Target This Month.xlsx"
-    st.write("**Sales data file:**", sales_path)
-    st.write("**Target data file:**", target_path)
-    min_date, max_date = get_sales_date_range(sales_path)
-    if min_date and max_date:
-        st.write(f"**Sales data range:** {min_date} to {max_date}")
-    else:
-        st.write("**Sales data range:** لا توجد بيانات تاريخ صالحة أو الملف غير متوفر")
-
-    st.subheader("📆 إعدادات MTD")
-    mtd_mode = st.radio(
-        "MTD calculation basis",
-        ["Last sales date", "Today"],
-        index=["Last sales date", "Today"].index(st.session_state.mtd_mode) if st.session_state.mtd_mode in ["Last sales date", "Today"] else 0,
-    )
-    st.session_state.mtd_mode = mtd_mode
-    month_length = st.session_state.mtd_month_length
-    if mtd_mode == "Last sales date":
-        default_month = month_length if month_length > 0 else 30
-        month_length = st.number_input(
-            "Month length to use for MTD",
-            min_value=1,
-            max_value=31,
-            value=default_month,
-            step=1,
-            help="Set the effective month length when the last days are holidays or non-working.",
-        )
-        st.session_state.mtd_month_length = month_length
-    else:
-        st.session_state.mtd_month_length = month_length
-    st.write("**Current MTD mode:**", mtd_mode)
-    if mtd_mode == "Last sales date":
-        st.write(f"**Manual month length:** {month_length} days")
-
-    st.header("👥 إدارة المستخدمين")
-    users = load_users()
-    st.dataframe(pd.DataFrame(users).T)
+    # تبويبات الإعدادات للمدير
+    settings_tabs = st.tabs(["📂 البيانات", "👥 المستخدمون", "📆 إعدادات أخرى"])
     
-    with st.expander("➕ إضافة مستخدم جديد"):
-        new_email = st.text_input("البريد الإلكتروني", key="add_email")
-        new_pass = st.text_input("كلمة المرور", type="password", key="add_password")
-        new_branches = st.text_area("الفروع المسموحة (كل فرع في سطر جديد)", key="add_branches").split("\n")
-        new_admin = st.checkbox("مدير؟", key="add_user_admin")
-        if st.button("إضافة", key="btn_add_user"):
-            if new_email and new_pass:
-                cleaned_branches = [b.strip() for b in new_branches if b.strip()]
-                add_user(new_email, new_pass, cleaned_branches, new_admin)
-                st.success("تمت الإضافة بنجاح")
-                st.rerun()
+    # تبويب 1: تحميل البيانات
+    with settings_tabs[0]:
+        st.header("📂 تحديث ملفات البيانات")
+        sales_file = st.file_uploader("رفع ملف المبيعات (Sales This Month.xlsx)", type=["xlsx"])
+        target_file = st.file_uploader("رفع ملف الأهداف (Target This Month.xlsx)", type=["xlsx"])
+        if st.button("تحميل ومعالجة"):
+            if sales_file and target_file:
+                with open("temp_sales.xlsx", "wb") as f:
+                    f.write(sales_file.read())
+                with open("temp_target.xlsx", "wb") as f:
+                    f.write(target_file.read())
+                st.cache_resource.clear()
+                st.success("تم رفع الملفات وتحديث البيانات بنجاح!")
             else:
-                st.error("يرجى ملء البريد الإلكتروني وكلمة المرور")
+                st.error("يرجى رفع كلا الملفين")
+        
+        st.subheader("📌 معلومات الملفات المرفوعة")
+        sales_path = "temp_sales.xlsx" if os.path.exists("temp_sales.xlsx") else "Sales (Naguib Selim) This Month.xlsx"
+        target_path = "temp_target.xlsx" if os.path.exists("temp_target.xlsx") else "Target This Month.xlsx"
+        st.write("**Sales data file:**", sales_path)
+        st.write("**Target data file:**", target_path)
+        min_date, max_date = get_sales_date_range(sales_path)
+        if min_date and max_date:
+            st.write(f"**Sales data range:** {min_date} to {max_date}")
     
-    with st.expander("✏️ تعديل مستخدم"):
-        if users:
-            edit_email = st.selectbox("اختر المستخدم", list(users.keys()), key="edit_select_user")
-            edit_pass = st.text_input("كلمة مرور جديدة (اتركه فارغاً إذا لم ترغب في التغيير)", type="password", key="edit_password")
-            current_branches = users[edit_email].get("branches", [])
-            edit_branches = st.text_area("الفروع المسموحة (كل فرع في سطر جديد)", value="\n".join(current_branches), key="edit_branches")
-            current_admin = users[edit_email].get("is_admin", False)
-            edit_admin = st.checkbox("مدير؟", value=current_admin, key="edit_user_admin")
-            if st.button("تحديث", key="btn_update_user"):
-                cleaned_edit_branches = [b.strip() for b in edit_branches.split("\n") if b.strip()]
-                update_user(edit_email, edit_pass if edit_pass else None, cleaned_edit_branches, edit_admin)
-                st.success("تم التحديث بنجاح")
-                st.rerun()
-        else:
-            st.info("لا يوجد مستخدمين مسجلين لتعديلهم.")
+    # تبويب 2: إدارة المستخدمين
+    with settings_tabs[1]:
+        st.header("👥 إدارة المستخدمين")
+        users = get_all_users()
+        
+        # عرض جدول المستخدمين
+        users_display = []
+        for email, user_data in users.items():
+            users_display.append({
+                "البريد الإلكتروني": email,
+                "نوع الصلاحية": PERMISSION_TYPES.get(user_data.get("permission_type"), "غير محدد"),
+                "مصدر الفروع": "مبيعات الفرع (System)" if user_data.get("branch_filter_type") == "branch" else ("مندوب المبيعات" if user_data.get("branch_filter_type") == "sales_rep" else "-"),
+                "الفروع": ", ".join(user_data.get("branches", [])) if user_data.get("branches") else "—"
+            })
+        st.dataframe(pd.DataFrame(users_display), use_container_width=True)
+        
+        # إضافة مستخدم جديد
+        with st.expander("➕ إضافة مستخدم جديد"):
+            col1, col2 = st.columns(2)
+            with col1:
+                new_email = st.text_input("البريد الإلكتروني", key="add_email")
+                new_password = st.text_input("كلمة المرور", type="password", key="add_password")
+            with col2:
+                permission_type = st.selectbox(
+                    "نوع الصلاحية", 
+                    ["all_branches", "specific_branches"],
+                    format_func=lambda x: PERMISSION_TYPES.get(x, x),
+                    key="add_permission"
+                )
+            
+            branch_filter_type = None
+            branches = []
+            
+            if permission_type == "specific_branches":
+                col1, col2 = st.columns(2)
+                with col1:
+                    branch_filter_type = st.radio(
+                        "تصفية الفروع حسب:",
+                        ["branch", "sales_rep"],
+                        format_func=lambda x: "مبيعات الفرع (System)" if x == "branch" else "مندوب المبيعات",
+                        key="add_filter_type"
+                    )
+                with col2:
+                    branches_input = st.text_area("الفروع المسموحة (كل فرع في سطر)", key="add_branches")
+                    branches = [b.strip() for b in branches_input.split("\n") if b.strip()]
+            
+            if st.button("إضافة المستخدم", key="btn_add_user"):
+                if new_email and new_password:
+                    add_user(new_email, new_password, permission_type, branch_filter_type, branches)
+                    st.success("✅ تمت الإضافة بنجاح")
+                    st.rerun()
+                else:
+                    st.error("❌ يرجى ملء جميع الحقول المطلوبة")
+        
+        # تعديل صلاحيات مستخدم
+        with st.expander("⚙️ تعديل صلاحيات مستخدم"):
+            if users:
+                edit_email = st.selectbox("اختر المستخدم", list(users.keys()), key="edit_email")
+                user_data = users[edit_email]
+                
+                st.subheader("الصلاحيات")
+                current_perm_type = user_data.get("permission_type", "specific_branches")
+                new_perm_type = st.selectbox(
+                    "نوع الصلاحية",
+                    ["all_branches", "specific_branches"],
+                    index=["all_branches", "specific_branches"].index(current_perm_type),
+                    format_func=lambda x: PERMISSION_TYPES.get(x, x),
+                    key="edit_permission"
+                )
+                
+                edit_branches = []
+                edit_filter_type = None
+                
+                if new_perm_type == "specific_branches":
+                    current_filter_type = user_data.get("branch_filter_type", "branch")
+                    edit_filter_type = st.radio(
+                        "تصفية الفروع حسب:",
+                        ["branch", "sales_rep"],
+                        index=["branch", "sales_rep"].index(current_filter_type),
+                        format_func=lambda x: "مبيعات الفرع (System)" if x == "branch" else "مندوب المبيعات",
+                        key="edit_filter_type",
+                        horizontal=True
+                    )
+                    
+                    current_branches = user_data.get("branches", [])
+                    branches_input = st.text_area(
+                        "الفروع المسموحة (كل فرع في سطر)",
+                        value="\n".join(current_branches),
+                        key="edit_branches"
+                    )
+                    edit_branches = [b.strip() for b in branches_input.split("\n") if b.strip()]
+                
+                if st.button("حفظ التعديلات", key="btn_update_user"):
+                    update_user(
+                        edit_email,
+                        password=None,
+                        permission_type=new_perm_type,
+                        branch_filter_type=edit_filter_type,
+                        branches=edit_branches if edit_branches else None
+                    )
+                    st.success("✅ تم تحديث الصلاحيات بنجاح")
+                    st.rerun()
+        
+        # حذف مستخدم
+        with st.expander("🗑️ حذف مستخدم"):
+            if users:
+                del_email = st.selectbox("اختر مستخدم للحذف", list(users.keys()), key="del_email")
+                if st.button("حذف المستخدم", key="btn_delete_user"):
+                    if del_email != "mahmoud.bayoumi@nstextile-eg.com":
+                        delete_user(del_email)
+                        st.success("✅ تم الحذف بنجاح")
+                        st.rerun()
+                    else:
+                        st.error("❌ لا يمكن حذف حساب المدير الرئيسي")
     
-    with st.expander("🗑️ حذف مستخدم"):
-        if users:
-            del_email = st.selectbox("اختر مستخدم للحذف", list(users.keys()), key="del_select_user")
-            if st.button("حذف", key="btn_delete_user"):
-                delete_user(del_email)
-                st.success("تم الحذف بنجاح")
-                st.rerun()
-        else:
-            st.info("لا يوجد مستخدمين مسجلين لحذفهم.")
+    # تبويب 3: إعدادات أخرى
+    with settings_tabs[2]:
+        st.header("📆 إعدادات MTD")
+        mtd_mode = st.radio(
+            "أساس حساب MTD",
+            ["Last sales date", "Today"],
+            index=["Last sales date", "Today"].index(st.session_state.mtd_mode) if st.session_state.mtd_mode in ["Last sales date", "Today"] else 0,
+        )
+        st.session_state.mtd_mode = mtd_mode
+        
+        if mtd_mode == "Last sales date":
+            default_month = st.session_state.mtd_month_length if st.session_state.mtd_month_length > 0 else 25
+            month_length = st.number_input(
+                "طول الشهر المستخدم للحساب",
+                min_value=1,
+                max_value=31,
+                value=default_month,
+                step=1,
+                help="حدد عدد أيام الشهر الفعلي عند وجود عطل في الأيام الأخيرة."
+            )
+            st.session_state.mtd_month_length = month_length
+        
+        st.write("**نمط MTD الحالي:**", mtd_mode)
+        if mtd_mode == "Last sales date":
+            st.write(f"**طول الشهر المعين:** {st.session_state.mtd_month_length} يوم")
 
-# واجهة لوحة المعلومات الرئيسية
+# واجهة NS Dashboard (Daily Sales) - May 2026
+def resolve_allowed_branches(sales_df, branch_column, user_branches, user_branch_filter_type):
+    if not user_branches:
+        return sorted(sales_df[branch_column].dropna().unique())
+    # بما أن أسماء الفروع مطابقة تماماً في كلا العمودين (مبيعات الفرع (System) ومبيعات الفرع حسب البياع)، فإن قائمة الفروع المسموحة هي نفس قائمة فروع حساب المستخدم مباشرة دون الحاجة لأي ربط
+    return sorted(user_branches)
+
+# واجهة NS Dashboard (Daily Sales) - May 2026
 def dashboard_page():
-    st.title("📊 لوحة المعلومات الرئيسية")
+    render_dashboard_header("NS Dashboard (Daily Sales) - May 2026")
     
     try:
         sales_df, branch_target, rep_target = load_all_data()
@@ -215,13 +424,16 @@ def dashboard_page():
         st.error("لم يتم العثور على ملفات البيانات في المجلد، أو أن هناك مشكلة توافق في الملفات المرفوعة. يرجى رفع الملفات الصحيحة من صفحة الإعدادات.")
         return
     
-# اختيار مصدر الفرع: الفرع الأصلي أم الفرع حسب مندوب المبيعات
-    branch_source = st.radio(
+    # --- 1. فلاتر تصفية البيانات في الشريط الجانبي (تظهر أولاً) ---
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🔍 فلاتر تصفية البيانات")
+
+    # اختيار مصدر الفرع: مبيعات الفرع (System) أم الفرع حسب مندوب المبيعات
+    branch_source = st.sidebar.radio(
         "مصدر الفرع",
-        ["الفرع الأصلي", "الفرع حسب المندوب"],
-        horizontal=True,
+        ["مبيعات الفرع حسب البياع", "مبيعات الفرع (System)"],
     )
-    if branch_source == "الفرع الأصلي":
+    if branch_source == "مبيعات الفرع (System)":
         branch_column = "Branch"
         brand_column = "Brand"
     else:
@@ -229,36 +441,69 @@ def dashboard_page():
         brand_column = "Brand based on sales reps"
 
     # فلتر الفروع حسب صلاحية المستخدم
-    allowed_branches = st.session_state.user_branches
-    if st.session_state.is_admin or not allowed_branches:
-        allowed_branches = list(sales_df[branch_column].dropna().unique())
+    user_permission_type = get_user_permission_type(st.session_state.user_email)
+    
+    if user_permission_type in ["super_admin", "all_branches"] or not st.session_state.user_branches:
+        allowed_branches = sorted(sales_df[branch_column].dropna().unique())
+    else:
+        allowed_branches = resolve_allowed_branches(
+            sales_df,
+            branch_column,
+            st.session_state.user_branches,
+            st.session_state.user_branch_filter_type,
+        )
+    # التحقق من ما إذا كان يجب إظهار فلتر البراند
+    # إخفاء فلتر البراند للمستخدمين ذوي صلاحيات على فروع معينة
+    show_brand_filter = user_permission_type in ["super_admin", "all_branches"]
 
-    # فلتر العلامة التجارية ونوع العميل
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
+    # فلتر العلامة التجارية ونوع العميل في القائمة الجانبية
+    if show_brand_filter:
         brand_options = ["الكل"] + sorted(sales_df[brand_column].dropna().unique())
-        brand_filter = st.selectbox("العلامة التجارية", brand_options)
-    with col2:
+        brand_filter = st.sidebar.selectbox("العلامة التجارية", brand_options)
+        
         # حصر خيارات الفروع حسب العلامة التجارية المختارة ومع مراعاة صلاحيات المستخدم
         if brand_filter == "الكل":
             branches_for_brand = list(sales_df[branch_column].dropna().unique())
         else:
             branches_for_brand = list(sales_df[sales_df[brand_column] == brand_filter][branch_column].dropna().unique())
-        if st.session_state.is_admin or not st.session_state.user_branches:
+        
+        # تصفية الفروع من allowed_branches المحسوبة بناءً على صلاحيات المستخدم
+        if user_permission_type in ["super_admin", "all_branches"] or not st.session_state.user_branches:
             branch_options = sorted(branches_for_brand)
         else:
+            # استخدام allowed_branches فقط - التي تم حسابها مع مراعاة صلاحيات المستخدم وتحويل الأعمدة
             branch_options = sorted([b for b in allowed_branches if b in branches_for_brand])
-        if not branch_options:
-            st.info("لا توجد فروع مطابقة للعلامة التجارية والصلاحيات.")
-        # استخدم droplist (selectbox) بدلاً من multiselect لعرض فرع واحد أو الكل
+            
         branch_choice_options = ["الكل"] + branch_options
-        branch_choice = st.selectbox("الفرع", branch_choice_options)
-    with col3:
-        cust_filter = st.selectbox("نوع العميل", ["الكل", "B2B", "B2C"])
-    with col4:
-        st.write(" ")
-        st.write(" ")
-        st.caption(f"تصفية بـ: {branch_source}")
+        branch_choice = st.sidebar.selectbox("الفرع", branch_choice_options)
+    else:
+        # اختيار تلقائي "الكل" للعلامة التجارية عند إخفائها للمستخدمين ذوي صلاحيات محدودة
+        brand_filter = "الكل"
+        # حصر خيارات الفروع حسب الفروع المسموحة فقط
+        branches_for_brand = list(sales_df[branch_column].dropna().unique())
+        # استخدام allowed_branches فقط (التي تم حسابها بناءً على صلاحيات المستخدم)
+        branch_options = sorted([b for b in allowed_branches if b in branches_for_brand])
+        
+        branch_choice_options = ["الكل"] + branch_options
+        branch_choice = st.sidebar.selectbox("الفرع", branch_choice_options)
+        
+    cust_filter = st.sidebar.selectbox("نوع العميل", ["الكل", "B2B", "B2C"])
+
+    # --- 2. إعدادات MTD في الشريط الجانبي (تظهر ثانياً) ---
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📆 حساب الهدف والنسب (MTD)")
+    
+    month_length_choice = st.sidebar.radio(
+        "طول الشهر المستخدم للحساب",
+        ["25 يوم", "عدد أيام الشهر الفعلية"],
+        index=0 if st.session_state.mtd_month_length == 25 else 1,
+        help="حدد إجمالي عدد الأيام في الشهر المستخدم لحساب نسبة الإنجاز والترجت حتى اليوم."
+    )
+    
+    if month_length_choice == "25 يوم":
+        st.session_state.mtd_month_length = 25
+    else:
+        st.session_state.mtd_month_length = 0
 
     # تحويل اختيار الفرع إلى قائمة فروع مستخدمة (مطلوب من compute_kpis)
     if branch_choice == "الكل":
@@ -384,17 +629,16 @@ def dashboard_page():
         cust_sales = filtered_sales[filtered_sales["Sales Type"].isin(["Sales", "Return"])].groupby("Customer Type")["Total After Disc"].sum()
         total_cust = cust_sales.sum()
         cust_percent = (cust_sales / total_cust * 100).round(1)
-        label_text = [f"{p:.1f}%\n{v:,.0f}" for p, v in zip(cust_percent, cust_sales.values)]
         fig_cust = px.bar(
             x=cust_sales.index,
             y=cust_sales.values,
             color=cust_sales.index,
             color_discrete_map={"B2B": "#1f77b4", "B2C": "#ff7f0e"},
-            text=label_text,
+            text=[f"{p:.1f}%" for p in cust_percent],
             labels={"x": "Customer Type", "y": "Sales Amount"},
             title="Sales by Customer Type",
         )
-        fig_cust.update_traces(textposition="outside", marker_line_width=0, textfont=dict(size=12))
+        fig_cust.update_traces(textposition="outside", marker_line_width=0)
         fig_cust.update_layout(
             height=420,
             margin=dict(l=50, r=40, t=60, b=70),
@@ -415,8 +659,11 @@ def dashboard_page():
         return None
 
     def pct_cell_style(val):
+        import math
         try:
             v = float(val)
+            if math.isnan(v):
+                return ""
         except Exception:
             return ""
         if v < 70:
@@ -425,6 +672,16 @@ def dashboard_page():
             return "color:black; background-color:#f0ad4e"
         else:
             return "color:black; background-color:#5cb85c"
+
+    def fmt_pct(val):
+        import math
+        try:
+            v = float(val)
+            if math.isnan(v):
+                return ""
+        except Exception:
+            return ""
+        return f"{v:.1f}%"
 
     col_s_b2b = find_target_column(branch_target, ["Sales Target | B2B", "Sales Target B2B", "B2B MTD Target"])
     col_s_b2c = find_target_column(branch_target, ["Sales Target | B2C", "Sales Target B2C", "B2C MTD Target"])
@@ -448,13 +705,13 @@ def dashboard_page():
             "Branch": branch,
             "B2B MTD Target": target_b2b,
             "Sales B2B": sales_b2b,
-            "B2B %": (sales_b2b / target_b2b * 100) if target_b2b else 0,
+            "B2B %": (sales_b2b / target_b2b * 100) if target_b2b else None,
             "B2C MTD Target": target_b2c,
             "Sales B2C": sales_b2c,
-            "B2C %": (sales_b2c / target_b2c * 100) if target_b2c else 0,
+            "B2C %": (sales_b2c / target_b2c * 100) if target_b2c else None,
             "Total Target": target_total,
             "Total Sales": sales_total,
-            "Sales %": (sales_total / target_total * 100) if target_total else 0,
+            "Sales %": (sales_total / target_total * 100) if target_total else None,
         })
 
     branch_perf_df = pd.DataFrame(branch_perf)
@@ -462,47 +719,39 @@ def dashboard_page():
         st.info("No branch targets available for selected filters.")
     else:
         totals = branch_perf_df[["B2B MTD Target", "Sales B2B", "B2C MTD Target", "Sales B2C", "Total Target", "Total Sales"]].sum(numeric_only=True)
-        totals["B2B %"] = (totals["Sales B2B"] / totals["B2B MTD Target"] * 100) if totals["B2B MTD Target"] else 0
-        totals["B2C %"] = (totals["Sales B2C"] / totals["B2C MTD Target"] * 100) if totals["B2C MTD Target"] else 0
-        totals["Sales %"] = (totals["Total Sales"] / totals["Total Target"] * 100) if totals["Total Target"] else 0
         totals_row = {
             "Branch": "Total",
             "B2B MTD Target": totals["B2B MTD Target"],
             "Sales B2B": totals["Sales B2B"],
-            "B2B %": totals["B2B %"],
+            "B2B %": (totals["Sales B2B"] / totals["B2B MTD Target"] * 100) if totals["B2B MTD Target"] else None,
             "B2C MTD Target": totals["B2C MTD Target"],
             "Sales B2C": totals["Sales B2C"],
-            "B2C %": totals["B2C %"],
+            "B2C %": (totals["Sales B2C"] / totals["B2C MTD Target"] * 100) if totals["B2C MTD Target"] else None,
             "Total Target": totals["Total Target"],
             "Total Sales": totals["Total Sales"],
-            "Sales %": totals["Sales %"],
+            "Sales %": (totals["Total Sales"] / totals["Total Target"] * 100) if totals["Total Target"] else None,
         }
         branch_perf_df = pd.concat([branch_perf_df, pd.DataFrame([totals_row])], ignore_index=True)
 
-        branch_perf_df = branch_perf_df.fillna(0)
-        branch_perf_df = branch_perf_df.astype({
-            "B2B MTD Target": float,
-            "Sales B2B": float,
-            "B2B %": float,
-            "B2C MTD Target": float,
-            "Sales B2C": float,
-            "B2C %": float,
-            "Total Target": float,
-            "Total Sales": float,
-            "Sales %": float,
-        })
+        branch_perf_df["B2B MTD Target"] = branch_perf_df["B2B MTD Target"].astype(float)
+        branch_perf_df["Sales B2B"] = branch_perf_df["Sales B2B"].astype(float)
+        branch_perf_df["B2C MTD Target"] = branch_perf_df["B2C MTD Target"].astype(float)
+        branch_perf_df["Sales B2C"] = branch_perf_df["Sales B2C"].astype(float)
+        branch_perf_df["Total Target"] = branch_perf_df["Total Target"].astype(float)
+        branch_perf_df["Total Sales"] = branch_perf_df["Total Sales"].astype(float)
 
         styled_branch_perf = branch_perf_df.style.format({
             "B2B MTD Target": "{:,.0f}",
             "Sales B2B": "{:,.0f}",
-            "B2B %": "{:.1f}%",
+            "B2B %": fmt_pct,
             "B2C MTD Target": "{:,.0f}",
             "Sales B2C": "{:,.0f}",
-            "B2C %": "{:.1f}%",
+            "B2C %": fmt_pct,
             "Total Target": "{:,.0f}",
             "Total Sales": "{:,.0f}",
-            "Sales %": "{:.1f}%",
-        }).apply(lambda col: col.map(pct_cell_style), subset=["B2B %", "B2C %", "Sales %"], axis=0)
+            "Sales %": fmt_pct,
+            "Branch": "{}",
+        }, na_rep="").apply(lambda col: col.map(pct_cell_style), subset=["B2B %", "B2C %", "Sales %"], axis=0)
 
         st.dataframe(styled_branch_perf, use_container_width=True)
 
@@ -519,14 +768,13 @@ def dashboard_page():
 
     # Determine which rep-based branches to include based on the current branch selection.
     if branch_choice == "الكل":
-        selected_rep_branches = sales_df[rep_branch_col].dropna().unique().tolist()
+        selected_rep_branches = selected_branches
     else:
-        # If the current branch_choice exists in rep-branch values, use it directly.
-        if branch_choice in sales_df[rep_branch_col].dropna().unique():
-            selected_rep_branches = [branch_choice]
-        else:
-            # Otherwise map original branch selection to rep-based branches present in the data
-            selected_rep_branches = sales_df[sales_df["Branch"] == branch_choice][rep_branch_col].dropna().unique().tolist()
+        selected_rep_branches = [branch_choice]
+
+    # تصفية الفروع المسموحة للبياعين بناءً على صلاحيات فروع المستخدم (من عمود Branch based on sales reps)
+    if user_permission_type not in ["super_admin", "all_branches"] and st.session_state.user_branches:
+        selected_rep_branches = [b for b in selected_rep_branches if b in st.session_state.user_branches]
 
     # Build sales data for reps using rep-based branch mapping, include returns for net calculation
     sales_rep_data = sales_df[sales_df[rep_branch_col].isin(selected_rep_branches) & sales_df["Sales Type"].isin(["Sales", "Return"])].copy()
@@ -537,36 +785,63 @@ def dashboard_page():
     if brand_filter and brand_filter != "الكل":
         sales_rep_data = sales_rep_data[sales_rep_data[rep_brand_col] == brand_filter]
 
-    sales_reps = sales_rep_data["Sales Person"].dropna().unique()
-    if isinstance(rep_target, pd.DataFrame) and "Sales Rep" in rep_target.columns:
-        target_reps = rep_target[rep_target["Sales Rep"].isin(sales_reps)]["Sales Rep"].dropna().unique()
-    else:
-        target_reps = sales_reps
+    # Build complete list of (Sales Rep, Branch) combinations from targets only
+    all_pairs = []
+    target_pairs = set()
+    if isinstance(rep_target, pd.DataFrame) and "Sales Rep" in rep_target.columns and "Branch" in rep_target.columns:
+        # Filter rep_target by selected branches and brand
+        filtered_rep_target = rep_target[rep_target["Branch"].isin(selected_rep_branches)].copy()
+        if brand_filter and brand_filter != "الكل" and "Brand" in filtered_rep_target.columns:
+            filtered_rep_target = filtered_rep_target[filtered_rep_target["Brand"] == brand_filter]
+        
+        for _, row in filtered_rep_target.iterrows():
+            r = row["Sales Rep"]
+            b = row["Branch"]
+            if pd.notna(r) and pd.notna(b):
+                target_pairs.add((str(r).strip(), str(b).strip()))
 
-    for rep in target_reps:
-        rep_row = rep_target[rep_target["Sales Rep"] == rep]
-        if rep_row.empty:
-            continue
-        target_b2b = float(rep_row[col_r_b2b].values[0]) * factor if col_r_b2b else 0
-        target_b2c = float(rep_row[col_r_b2c].values[0]) * factor if col_r_b2c else 0
-        target_total = float(rep_row[col_r_total].values[0]) * factor if col_r_total else 0
-        if target_total == 0 and target_b2b == 0 and target_b2c == 0:
-            continue
+    # Sort them by Branch first, then by Sales Rep name
+    all_pairs = sorted(list(target_pairs), key=lambda x: (x[1], x[0]))
 
-        sales_b2b = sales_rep_data[(sales_rep_data["Sales Person"] == rep) & (sales_rep_data["Customer Type"] == "B2B")]["Total After Disc"].sum()
-        sales_b2c = sales_rep_data[(sales_rep_data["Sales Person"] == rep) & (sales_rep_data["Customer Type"] == "B2C")]["Total After Disc"].sum()
+    for rep, branch in all_pairs:
+        # Find targets for this rep in this branch
+        rep_row = pd.DataFrame()
+        if isinstance(rep_target, pd.DataFrame) and "Sales Rep" in rep_target.columns and "Branch" in rep_target.columns:
+            rep_row = rep_target[
+                (rep_target["Sales Rep"].astype(str).str.strip() == rep) & 
+                (rep_target["Branch"].astype(str).str.strip() == branch)
+            ]
+        
+        target_b2b = float(pd.to_numeric(rep_row[col_r_b2b], errors="coerce").fillna(0).sum()) * factor if col_r_b2b and not rep_row.empty else 0
+        target_b2c = float(pd.to_numeric(rep_row[col_r_b2c], errors="coerce").fillna(0).sum()) * factor if col_r_b2c and not rep_row.empty else 0
+        target_total = float(pd.to_numeric(rep_row[col_r_total], errors="coerce").fillna(0).sum()) * factor if col_r_total and not rep_row.empty else 0
+
+        # Find actual sales for this rep in this branch
+        rep_sales_df = sales_rep_data[
+            (sales_rep_data["Sales Person"].astype(str).str.strip() == rep) & 
+            (sales_rep_data[rep_branch_col].astype(str).str.strip() == branch)
+        ]
+        
+        sales_b2b = rep_sales_df[rep_sales_df["Customer Type"] == "B2B"]["Total After Disc"].sum()
+        sales_b2c = rep_sales_df[rep_sales_df["Customer Type"] == "B2C"]["Total After Disc"].sum()
         sales_total = sales_b2b + sales_b2c
+
+        # Skip reps that have no target and no sales
+        if target_total == 0 and target_b2b == 0 and target_b2c == 0 and sales_total == 0:
+            continue
+
         rep_perf.append({
+            "Branch": branch,
             "Sales Rep": rep,
             "B2B MTD Target": target_b2b,
             "Sales B2B": sales_b2b,
-            "B2B %": (sales_b2b / target_b2b * 100) if target_b2b else 0,
+            "B2B %": (sales_b2b / target_b2b * 100) if target_b2b else None,
             "B2C MTD Target": target_b2c,
             "Sales B2C": sales_b2c,
-            "B2C %": (sales_b2c / target_b2c * 100) if target_b2c else 0,
+            "B2C %": (sales_b2c / target_b2c * 100) if target_b2c else None,
             "Total Target": target_total,
             "Total Sales": sales_total,
-            "Sales %": (sales_total / target_total * 100) if target_total else 0,
+            "Sales %": (sales_total / target_total * 100) if target_total else None,
         })
 
     rep_perf_df = pd.DataFrame(rep_perf)
@@ -574,56 +849,56 @@ def dashboard_page():
         st.info("No sales rep targets available for selected filters.")
     else:
         totals = rep_perf_df[["B2B MTD Target", "Sales B2B", "B2C MTD Target", "Sales B2C", "Total Target", "Total Sales"]].sum(numeric_only=True)
-        totals["B2B %"] = (totals["Sales B2B"] / totals["B2B MTD Target"] * 100) if totals["B2B MTD Target"] else 0
-        totals["B2C %"] = (totals["Sales B2C"] / totals["B2C MTD Target"] * 100) if totals["B2C MTD Target"] else 0
-        totals["Sales %"] = (totals["Total Sales"] / totals["Total Target"] * 100) if totals["Total Target"] else 0
         totals_row = {
+            "Branch": "",
             "Sales Rep": "Total",
             "B2B MTD Target": totals["B2B MTD Target"],
             "Sales B2B": totals["Sales B2B"],
-            "B2B %": totals["B2B %"],
+            "B2B %": (totals["Sales B2B"] / totals["B2B MTD Target"] * 100) if totals["B2B MTD Target"] else None,
             "B2C MTD Target": totals["B2C MTD Target"],
             "Sales B2C": totals["Sales B2C"],
-            "B2C %": totals["B2C %"],
+            "B2C %": (totals["Sales B2C"] / totals["B2C MTD Target"] * 100) if totals["B2C MTD Target"] else None,
             "Total Target": totals["Total Target"],
             "Total Sales": totals["Total Sales"],
-            "Sales %": totals["Sales %"],
+            "Sales %": (totals["Total Sales"] / totals["Total Target"] * 100) if totals["Total Target"] else None,
         }
         rep_perf_df = pd.concat([rep_perf_df, pd.DataFrame([totals_row])], ignore_index=True)
 
-        rep_perf_df = rep_perf_df.fillna(0)
-        rep_perf_df = rep_perf_df.astype({
-            "B2B MTD Target": float,
-            "Sales B2B": float,
-            "B2B %": float,
-            "B2C MTD Target": float,
-            "Sales B2C": float,
-            "B2C %": float,
-            "Total Target": float,
-            "Total Sales": float,
-            "Sales %": float,
-        })
+        rep_perf_df["B2B MTD Target"] = rep_perf_df["B2B MTD Target"].astype(float)
+        rep_perf_df["Sales B2B"] = rep_perf_df["Sales B2B"].astype(float)
+        rep_perf_df["B2C MTD Target"] = rep_perf_df["B2C MTD Target"].astype(float)
+        rep_perf_df["Sales B2C"] = rep_perf_df["Sales B2C"].astype(float)
+        rep_perf_df["Total Target"] = rep_perf_df["Total Target"].astype(float)
+        rep_perf_df["Total Sales"] = rep_perf_df["Total Sales"].astype(float)
 
         styled_rep_perf = rep_perf_df.style.format({
             "B2B MTD Target": "{:,.0f}",
             "Sales B2B": "{:,.0f}",
-            "B2B %": "{:.1f}%",
+            "B2B %": fmt_pct,
             "B2C MTD Target": "{:,.0f}",
             "Sales B2C": "{:,.0f}",
-            "B2C %": "{:.1f}%",
+            "B2C %": fmt_pct,
             "Total Target": "{:,.0f}",
             "Total Sales": "{:,.0f}",
-            "Sales %": "{:.1f}%",
-        }).apply(lambda col: col.map(pct_cell_style), subset=["B2B %", "B2C %", "Sales %"], axis=0)
+            "Sales %": fmt_pct,
+            "Branch": "{}",
+            "Sales Rep": "{}",
+        }, na_rep="").apply(lambda col: col.map(pct_cell_style), subset=["B2B %", "B2C %", "Sales %"], axis=0)
 
         st.dataframe(styled_rep_perf, use_container_width=True)
 
 # توجيه الصفحات
+def get_first_name_from_email(email):
+    local_part = email.split('@')[0]
+    first_name = local_part.split('.')[0]
+    return first_name
+
 def main():
     if not st.session_state.logged_in:
         login_page()
     else:
-        st.sidebar.title(f"مرحباً {st.session_state.user_email}")
+        first_name = get_first_name_from_email(st.session_state.user_email)
+        st.sidebar.title(f"مرحباً {first_name}")
         if st.sidebar.button("تسجيل الخروج"):
             st.session_state.logged_in = False
             st.rerun()

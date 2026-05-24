@@ -1,17 +1,114 @@
 {
     "ahmed.essam@nstextile-eg.com": {
-        "password": "a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3",
-        "branches": ["فرع الازهر2", "فرع الازهر3", "فرع القلعة", "فرع الموسكى"],
-        "is_admin": false
+        "password": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+        "permission_type": "specific_branches",
+        "branch_filter_type": "sales_rep",
+        "branches": [
+            "فرع الازهر2",
+            "فرع الازهر3",
+            "فرع القلعة",
+            "فرع الموسكى"
+        ],
+        "sales_reps": []
+    },
+    "shenouda.samir@nstextile-eg.com": {
+        "password": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+        "permission_type": "specific_branches",
+        "branch_filter_type": "sales_rep",
+        "branches": [
+            "فرع فيصل",
+            "فرع حلوان",
+            "فرع الحصرى - اكتوبر"
+        ],
+        "sales_reps": []
+    },
+    "abdelrahmanmagdy@nstextile-eg.com": {
+        "password": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+        "permission_type": "specific_branches",
+        "branch_filter_type": "sales_rep",
+        "branches": [
+            "فرع مدينة نصر",
+            "فرع النزهة",
+            "فرع زهراء المعادي"
+        ],
+        "sales_reps": []
+    },
+    "amr.elshenawy@nstextile-eg.com": {
+        "password": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+        "permission_type": "specific_branches",
+        "branch_filter_type": "sales_rep",
+        "branches": [
+            "فرع طنطا",
+            "فرع الاسكندرية",
+            "فرع المنصورة",
+            "فرع سموحة"
+        ],
+        "sales_reps": []
+    },
+    "youssef.ramzy@nstextile-eg.com": {
+        "password": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+        "permission_type": "specific_branches",
+        "branch_filter_type": "sales_rep",
+        "branches": [
+            "فرع ثاوث جيت - التجمع",
+            "فرع اير مول - مدينتى",
+            "فرع مافيدا",
+            "فرع مول العرب",
+            "فرع مول مصر",
+            "فرع الشيخ زايد"
+        ],
+        "sales_reps": []
+    },
+    "ahmed.magdy.bedir@nstextile-eg.com": {
+        "password": "4c5d6e7f8a9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4",
+        "permission_type": "specific_branches",
+        "branch_filter_type": "sales_rep",
+        "branches": [
+            "فرع مول العرب",
+            "فرع مول مصر",
+            "فرع الشيخ زايد"
+        ],
+        "sales_reps": []
+    },
+    "sherif.hassieb@nstextile-eg.com": {
+        "password": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+        "permission_type": "specific_branches",
+        "branch_filter_type": "sales_rep",
+        "branches": [
+            "فرع دمياط - تجزئة"
+        ],
+        "sales_reps": []
     },
     "mohamed.hussein@nstextile-eg.com": {
-        "password": "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9",
+        "password": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+        "permission_type": "all_branches",
+        "branch_filter_type": null,
         "branches": [],
-        "is_admin": true
+        "sales_reps": []
     },
     "mahmoud.bayoumi@nstextile-eg.com": {
         "password": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+        "permission_type": "super_admin",
+        "branch_filter_type": null,
         "branches": [],
-        "is_admin": true
+        "sales_reps": []
+    },
+    "mohamed.zayed@nstextile-eg.com": {
+        "password": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+        "permission_type": "all_branches",
+        "branch_filter_type": null,
+        "branches": [],
+        "sales_reps": []
+    },
+    "ahmed.medhat@nstextile-eg.com": {
+        "password": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+        "permission_type": "specific_branches",
+        "branch_filter_type": "branch",
+        "branches": [
+            "كاربتشر العبور",
+            "امريكان فرنتشر",
+            "ذا هاب - كايرو فيستيفال سيتي"
+        ],
+        "sales_reps": []
     }
 }

@@ -1,4 +1,5 @@
 streamlit
+st-theme
 pandas
 openpyxl
 plotly
