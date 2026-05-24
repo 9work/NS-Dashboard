@@ -50,6 +50,29 @@ from data_manager import load_sales_data, load_target_data, compute_kpis, comput
 # إعدادات الصفحة
 st.set_page_config(page_title="NSTextile Dashboard", layout="wide")
 
+# تقليل حجم خط الصفحة لإظهار بيانات أكثر في الشاشة
+st.markdown("""
+<style>
+    /* تقليل حجم الخط العام للصفحة */
+    html, body, [class*="css"] {
+        font-size: 13px !important;
+    }
+    /* تقليل حجم جداول البيانات */
+    .stDataFrame, .stDataFrame table {
+        font-size: 12px !important;
+    }
+    /* تقليل padding في بطاقات KPI */
+    [data-testid="metric-container"] {
+        padding: 6px 10px !important;
+    }
+    /* تقليل الهامش بين العناصر */
+    .block-container {
+        padding-top: 1rem !important;
+        padding-bottom: 1rem !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 # جلسة المستخدم
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
